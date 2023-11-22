@@ -2,8 +2,10 @@ package org.embulk.output.sqlserver;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 
 import org.embulk.output.jdbc.JdbcColumn;
 import org.embulk.output.jdbc.JdbcOutputConnection;
@@ -14,15 +16,23 @@ import org.embulk.output.jdbc.TableIdentifier;
 public class SQLServerOutputConnection
         extends JdbcOutputConnection
 {
-    public SQLServerOutputConnection(Connection connection, String schemaName)
+    private final Product product;
+
+    public SQLServerOutputConnection(Connection connection, String schemaName, Product product)
             throws SQLException
     {
         super(connection, schemaName);
+        this.product = product;
     }
 
     @Override
     protected String buildRenameTableSql(TableIdentifier fromTable, TableIdentifier toTable)
     {
+        // https://learn.microsoft.com/en-us/sql/relational-databases/system-stored-procedures/sp-rename-transact-sql?view=azure-sqldw-latest#remarks
+        // In Azure Synapse Analytics, sp_rename is in Preview for dedicated SQL pools and can only be used to rename a 'COLUMN' in a user object.
+        if (Product.AZURE_SYNAPSE_ANALYTICS.equals(product)) {
+            return buildRenameTableSqlForAzureSynapseAnalytics(fromTable, toTable);
+        }
         // sp_rename cannot change schema of table
         StringBuilder sb = new StringBuilder();
         sb.append("EXEC sp_rename ");
@@ -37,6 +47,12 @@ public class SQLServerOutputConnection
         return sb.toString();
     }
 
+    private String buildRenameTableSqlForAzureSynapseAnalytics(TableIdentifier fromTable, TableIdentifier toTable)
+    {
+        // https://learn.microsoft.com/en-us/sql/t-sql/statements/rename-transact-sql?view=azure-sqldw-latest#rename-object---database_name---schema_name------schema_name----table_name-to-new_table_name
+        return "RENAME OBJECT " + quoteTableIdentifier(fromTable) + " TO " + quoteIdentifierString(toTable.getTableName());
+    }
+
     @Override
     protected String buildColumnTypeName(JdbcColumn c)
     {
@@ -44,6 +60,12 @@ public class SQLServerOutputConnection
         case "BOOLEAN":
             return "BIT";
         case "CLOB":
+            // https://learn.microsoft.com/en-us/azure/synapse-analytics/sql/develop-tables-data-types#minimize-row-length
+            // https://learn.microsoft.com/en-us/azure/synapse-analytics/sql/develop-tables-data-types#unsupported-data-types
+            // Workarounds for unsupported data types
+            if(Product.AZURE_SYNAPSE_ANALYTICS.equals(product)) {
+                return "NVARCHAR(4000)";
+            }
             return "TEXT";
         case "TIMESTAMP":
             return "DATETIME2";
@@ -148,5 +170,54 @@ public class SQLServerOutputConnection
             sb.append(quoteIdentifierString(schema.getColumnName(i)));
         }
         return sb.toString();
+    }
+
+    @FunctionalInterface
+    private interface DDL
+    {
+        void execute() throws SQLException;
+    }
+
+    private void executeDDLInAutoCommit(DDL ddl) throws SQLException
+    {
+        // https://learn.microsoft.com/en-us/azure/synapse-analytics/sql-data-warehouse/sql-data-warehouse-develop-transactions#limitations
+        // No support for DDL such as CREATE TABLE inside a user-defined transaction
+        boolean autoCommit = connection.getAutoCommit();
+        try {
+            connection.setAutoCommit(true);
+            ddl.execute();
+        } finally {
+            connection.setAutoCommit(autoCommit);
+        }
+    }
+
+    @Override
+    public void createTable(TableIdentifier table, JdbcSchema schema, Optional<String> tableConstraint, Optional<String> tableOption) throws SQLException
+    {
+        if (Product.AZURE_SYNAPSE_ANALYTICS.equals(product)) {
+            executeDDLInAutoCommit(() -> super.createTable(table, schema, tableConstraint, tableOption));
+        } else {
+            super.createTable(table, schema, tableConstraint, tableOption);
+        }
+    }
+
+    @Override
+    public void replaceTable(TableIdentifier fromTable, JdbcSchema schema, TableIdentifier toTable, Optional<String> postSql) throws SQLException
+    {
+        if (Product.AZURE_SYNAPSE_ANALYTICS.equals(product)) {
+            executeDDLInAutoCommit(() -> super.replaceTable(fromTable, schema, toTable, postSql));
+        } else {
+            super.replaceTable(fromTable, schema, toTable, postSql);
+        }
+    }
+
+    @Override
+    protected void dropTable(Statement stmt, TableIdentifier table) throws SQLException
+    {
+        if (Product.AZURE_SYNAPSE_ANALYTICS.equals(product)) {
+            executeDDLInAutoCommit(() -> super.dropTable(stmt, table));
+        } else {
+            super.dropTable(stmt, table);
+        }
     }
 }

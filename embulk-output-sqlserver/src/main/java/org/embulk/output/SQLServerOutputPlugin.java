@@ -11,6 +11,7 @@ import org.embulk.output.jdbc.TableIdentifier;
 import org.embulk.output.jdbc.setter.ColumnSetterFactory;
 import org.embulk.output.sqlserver.InsertMethod;
 import org.embulk.output.sqlserver.NativeBatchInsert;
+import org.embulk.output.sqlserver.Product;
 import org.embulk.output.sqlserver.SQLServerOutputConnector;
 import org.embulk.output.sqlserver.setter.SQLServerColumnSetterFactory;
 import org.embulk.util.config.Config;
@@ -103,6 +104,14 @@ public class SQLServerOutputPlugin
         @Config("socket_timeout")
         @ConfigDefault("null")
         public Optional<Integer> getSocketTimeout();
+
+        @Config("product")
+        @ConfigDefault("\"sql_server\"")
+        public Product getProduct();
+
+        @Config("host_name_in_certificate")
+        @ConfigDefault("null")
+        public Optional<String> getHostNameInCertificate();
     }
 
     private static class UrlAndProperties {
@@ -175,7 +184,7 @@ public class SQLServerOutputPlugin
         UrlAndProperties urlProps = getUrlAndProperties(sqlServerTask, useJtdsDriver);
         logConnectionProperties(urlProps.getUrl(), urlProps.getProps());
         return new SQLServerOutputConnector(urlProps.getUrl(), urlProps.getProps(), sqlServerTask.getSchema().orElse(null),
-                sqlServerTask.getTransactionIsolation());
+                sqlServerTask.getTransactionIsolation(), sqlServerTask.getProduct());
     }
 
     private UrlAndProperties getUrlAndProperties(SQLServerPluginTask sqlServerTask, boolean useJtdsDriver)
@@ -267,6 +276,19 @@ public class SQLServerOutputPlugin
 
             if (sqlServerTask.getSocketTimeout().isPresent()) {
                 props.setProperty("socketTimeout", String.valueOf(sqlServerTask.getSocketTimeout().get() * 1000L)); // milliseconds
+            }
+
+            // https://learn.microsoft.com/en-us/azure/synapse-analytics/sql-data-warehouse/sql-data-warehouse-connect-overview#jdbc-connection-string-example
+            // jdbc:sqlserver://yourserver.database.windows.net:1433;database=yourdatabase;user={your_user_name};password={your_password_here};encrypt=true;trustServerCertificate=false;hostNameInCertificate=*.database.windows.net;loginTimeout=30;
+            // https://learn.microsoft.com/en-us/azure/synapse-analytics/sql/connect-overview#jdbc-connection-string-example
+            // jdbc:sqlserver://yourserver.sql.azuresynapse.net:1433;database=yourdatabase;user={your_user_name};password={your_password_here};encrypt=true;trustServerCertificate=false;hostNameInCertificate=*.sql.azuresynapse.net;loginTimeout=30;
+            // https://learn.microsoft.com/en-us/sql/connect/jdbc/setting-the-connection-properties?view=azure-sqldw-latest#properties
+            if (Product.AZURE_SYNAPSE_ANALYTICS.equals(sqlServerTask.getProduct())) {
+                urlBuilder.append(";encrypt=true");
+                urlBuilder.append(";trustServerCertificate=false");
+                String host = sqlServerTask.getHost().get();
+                String hostNameInCertificate = sqlServerTask.getHostNameInCertificate().orElse(host.replaceFirst("^[^.]+\\.(.*)$", "*.$1"));
+                urlBuilder.append(";hostNameInCertificate=").append(hostNameInCertificate);
             }
 
             url = urlBuilder.toString();
