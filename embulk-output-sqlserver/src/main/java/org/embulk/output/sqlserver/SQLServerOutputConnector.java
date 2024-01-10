@@ -22,14 +22,16 @@ public class SQLServerOutputConnector
     private final String url;
     private final Properties properties;
     private final String schemaName;
+    private final Product product;
 
     public SQLServerOutputConnector(String url, Properties properties, String schemaName,
-            Optional<TransactionIsolation> transactionIsolation)
+            Optional<TransactionIsolation> transactionIsolation, Product product)
     {
         super(transactionIsolation);
         this.url = url;
         this.properties = properties;
         this.schemaName = schemaName;
+        this.product = product;
     }
 
     @Override
@@ -59,7 +61,7 @@ public class SQLServerOutputConnector
         }
 
         try {
-            SQLServerOutputConnection con = new SQLServerOutputConnection(c, schemaName);
+            SQLServerOutputConnection con = new SQLServerOutputConnection(c, schemaName, product);
             c = null;
             return con;
 
