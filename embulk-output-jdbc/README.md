@@ -25,6 +25,7 @@ Generic JDBC output plugin for Embulk loads records to a database using a JDBC d
 - **retry_wait**: initial retry wait time in milliseconds (integer, default: 1000 (1 second))
 - **max_retry_wait**: upper limit of retry wait, which will be doubled at every retry (integer, default: 1800000 (30 minutes))
 - **mode**: "insert", "insert_direct", "truncate_insert", or "replace". See below (string, required)
+- **single_intermediate_table**: (boolean, default: false)
 - **batch_size**: size of a single batch insert (integer, default: 16777216)
 - **max_table_name_length**: maximum length of table name in this RDBMS (integer, default: 256)
 - **default_timezone**: If input column type (embulk type) is timestamp, this plugin needs to format the timestamp into a SQL string. This default_timezone option is used to control the timezone. You can overwrite timezone for each columns using column_options option. (string, default: `UTC`)

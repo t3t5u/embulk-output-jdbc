@@ -17,7 +17,7 @@ allprojects {
 }
 
 ext {
-    troccoVersion = "0.0.2"
+    troccoVersion = "0.0.1"
 }
 
 subprojects {
