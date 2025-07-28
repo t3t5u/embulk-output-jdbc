@@ -94,6 +94,10 @@ public abstract class AbstractJdbcOutputPlugin
         @Config("mode")
         public Mode getMode();
 
+        @Config("single_intermediate_table")
+        @ConfigDefault("false")
+        public boolean getSingleIntermediateTable();
+
         @Config("batch_size")
         @ConfigDefault("16777216")
         // TODO set minimum number
@@ -472,7 +476,7 @@ public abstract class AbstractJdbcOutputPlugin
     {
         PluginTask task = TASK_MAPPER.map(taskSource, this.getTaskClass());
 
-        if (!task.getMode().tempTablePerTask()) {
+        if (!task.getMode().tempTablePerTask() || task.getSingleIntermediateTable()) {
             throw new UnsupportedOperationException("inplace mode is not resumable. You need to delete partially-loaded records from the database and restart the entire transaction.");
         }
 
@@ -696,7 +700,7 @@ public abstract class AbstractJdbcOutputPlugin
                 public List<TableIdentifier> call() throws Exception
                 {
                     intermTables = new ArrayList<>();
-                    if (task.getMode().tempTablePerTask()) {
+                    if (task.getMode().tempTablePerTask() && !task.getSingleIntermediateTable()) {
                         String tableNameFormat = generateIntermediateTableNameFormat(task.getActualTable().getTableName(), con, taskCount,
                                 task.getFeatures().getMaxTableNameLength(), task.getFeatures().getTableNameLengthSemantics());
                         for (int taskIndex = 0; taskIndex < taskCount; taskIndex++) {
@@ -1091,7 +1095,7 @@ public abstract class AbstractJdbcOutputPlugin
 
             // configure BatchInsert -> an intermediate table (!isDirectModify) or the target table (isDirectModify)
             TableIdentifier destTable;
-            if (mode.tempTablePerTask()) {
+            if (mode.tempTablePerTask() && !task.getSingleIntermediateTable()) {
                 destTable = task.getIntermediateTables().get().get(taskIndex);
             } else if (mode.isDirectModify()) {
                 destTable = task.getActualTable();
